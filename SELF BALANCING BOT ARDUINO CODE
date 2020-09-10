@@ -1,0 +1,147 @@
+#include <Wire.h>//this library allows to communicate with i2c devices
+
+int16_t ax,ay,az,gy;//to store values of acceleration and gyro, we use 16bits int
+
+double time,elapsedtm,previoustm;//variables to store the values of time elapsed,prevoius time and present time
+
+float acceleration_angle;//storing angle measured from accelerometer
+float gyro_angle;//storing angle measured from gyroscope
+float total_angle;//fianl measured angle
+
+
+//PID variables
+
+double measuredpos,error,prevError;
+double integral,proportional,derivative;
+double output;
+
+double targetpos=0;
+double kp=15;
+double kd=0.1;
+double ki=0;
+
+//PINS USED
+int ENA=11;
+int IN1=6;
+int IN2=9;
+int ENB=12;
+int IN3=10;
+int IN4=8;
+
+double outputMod,errorMod;
+
+
+
+
+
+
+void setup()
+{
+  Wire.begin(); //begin the wire comunication using I2C
+  Wire.beginTransmission(0x68);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
+  Serial.begin(115200);
+
+  time=millis();
+}
+
+void loop()
+{
+//.....................................................................................................
+  //Finding angle using MPU6050
+
+  previoustm=time;  // the previous time is stored before the actual time read
+    time=millis();  // actual time read
+    elapsedtm=(time - previoustm) / 1000; //elapsed time is stored in seconds
+
+     Wire.beginTransmission(0x68);
+     Wire.write(0x3B); //Ask for the 0x3B register- correspond to AcX
+     Wire.endTransmission(false);
+     Wire.requestFrom(0x68,6,true); //requesting for 6 registers
+
+     ax=Wire.read()<<8|Wire.read(); //reading the value of ax in 16 bit pair of 2 registers and doing the same with ay and az
+     ay=Wire.read()<<8|Wire.read();
+     az=Wire.read()<<8|Wire.read();
+   
+    //finding acceleration angle using values of ax,ay,az  
+     acceleration_angle = atan(-1*(ax/16384.0)/sqrt(pow((ay/16384.0),2) + pow((az/16384.0),2)))*(180/3.14);
+ 
+   //getting the gyroscope angle for y-axis
+   Wire.beginTransmission(0x68);
+   Wire.write(0x43); //Gyro data first adress
+   Wire.endTransmission(false);
+   Wire.requestFrom(0x68,2,true); //request for 2 registers
+
+   gy=Wire.read()<<8|Wire.read();//reading the value of gyroscope in 16 bit pair of 2 registers
+   gyro_angle = gy/131.0;
+   
+ //finding the total angle using the accelaration angle and gyro angle  
+   total_angle = 0.98 *(total_angle + gyro_angle*elapsedtm) + 0.02*acceleration_angle;
+   
+  //printing total angle on serial monitor
+    Serial.print(":");
+    Serial.println(total_angle);
+
+//.........................................................................................................................
+    //PID CONTROLS
+
+    measuredpos=total_angle;    //storing the measured angle 
+    prevError=error;            //storing the previous error
+    error=measuredpos-targetpos;//finding the error using measured angle and target angle
+
+    proportional=kp*error;                          //finding the proportional term
+
+    derivative=kd*((error-prevError)/elapsedtm);    //finding the derivative term
+
+    integral=ki*(integral+error);                   //finding the integral term
+
+    output=proportional+derivative+integral;        //adding the three terms to get output using PID
+    
+    Serial.print(output);                           //printing output on the serial monitor
+    
+    
+//.........................................................................................................................
+    //MOTOR CONTROLS
+
+    if(error<0)
+    {errorMod=error*-1;}//taking an absolute value for error in errorMod
+
+    if(output<0)
+    {outputMod=output*-1;}//taking an absolute value for output in outputMod
+
+    if((errorMod>0)&&(errorMod<25))//checking conditions whether bot is falling or not
+    {
+      if(error>0)                   //if bot is falling forward    
+    {digitalWrite(IN1, LOW);
+     digitalWrite(IN2, HIGH);
+     digitalWrite(IN3, LOW);
+     digitalWrite(IN4, HIGH);
+     analogWrite(ENA,output);
+     analogWrite(ENB,output+50);
+     Serial.print(":FORWARD");
+    }
+    else if(error<0)                 //if bot is falling backward
+     {digitalWrite(IN1, HIGH);
+     digitalWrite(IN2, LOW);
+     digitalWrite(IN3, HIGH);
+     digitalWrite(IN4, LOW);
+     analogWrite(ENA,outputMod);
+     analogWrite(ENB,outputMod+50);
+     Serial.print(":BACKWARD");
+    }
+    else                           //stop the motors by default
+    {digitalWrite(IN1, LOW);
+     digitalWrite(IN2, LOW);
+     digitalWrite(IN3, LOW);
+     digitalWrite(IN4, LOW);
+     Serial.print(":STOP");
+     }
+    
+    }
+    
+     
+    
+
+}
